@@ -28,16 +28,16 @@ class Net(nn.Module):
         self.board_width = board_width
         self.board_height = board_height
         # common layers
-        self.conv1 = nn.Conv2d(4, 32, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(6, 48, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(48, 96, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(96, 192, kernel_size=3, padding=1)
         # action policy layers
-        self.act_conv1 = nn.Conv2d(128, 4, kernel_size=1)
-        self.act_fc1 = nn.Linear(4*board_width*board_height,
+        self.act_conv1 = nn.Conv2d(192, 6, kernel_size=1)
+        self.act_fc1 = nn.Linear(6*board_width*board_height,
                                  board_width*board_height)
         # state value layers
-        self.val_conv1 = nn.Conv2d(128, 2, kernel_size=1)
-        self.val_fc1 = nn.Linear(2*board_width*board_height, 64)
+        self.val_conv1 = nn.Conv2d(192, 4, kernel_size=1)
+        self.val_fc1 = nn.Linear(4*board_width*board_height, 64)
         self.val_fc2 = nn.Linear(64, 1)
 
     def forward(self, state_input):
@@ -47,13 +47,13 @@ class Net(nn.Module):
         x = F.relu(self.conv3(x))
         # action policy layers
         x_act = F.relu(self.act_conv1(x))
-        x_act = x_act.view(-1, 4*self.board_width*self.board_height)
+        x_act = x_act.view(-1, 6*self.board_width*self.board_height)
         x_act = F.log_softmax(self.act_fc1(x_act))
         # state value layers
         x_val = F.relu(self.val_conv1(x))
-        x_val = x_val.view(-1, 2*self.board_width*self.board_height)
+        x_val = x_val.view(-1, 4*self.board_width*self.board_height)
         x_val = F.relu(self.val_fc1(x_val))
-        x_val = F.tanh(self.val_fc2(x_val))
+        x_val = torch.tanh(self.val_fc2(x_val))
         return x_act, x_val
 
 
@@ -65,6 +65,8 @@ class PolicyValueNet():
         self.board_width = board_width
         self.board_height = board_height
         self.l2_const = 1e-4  # coef of l2 penalty
+        #lists to store loss and entropy
+
         # the policy value net module
         if self.use_gpu:
             self.policy_value_net = Net(board_width, board_height).cuda()
@@ -76,6 +78,9 @@ class PolicyValueNet():
         if model_file:
             net_params = torch.load(model_file)
             self.policy_value_net.load_state_dict(net_params)
+            self.loss_list,self.entropy_list = torch.load(model_file[:-6]+'_loss.pt')
+        else:
+            self.loss_list,self.entropy_list = [],[]
 
     def policy_value(self, state_batch):
         """
@@ -101,7 +106,7 @@ class PolicyValueNet():
         """
         legal_positions = board.availables
         current_state = np.ascontiguousarray(board.current_state().reshape(
-                -1, 4, self.board_width, self.board_height))
+                -1, 6, self.board_width, self.board_height))
         if self.use_gpu:
             log_act_probs, value = self.policy_value_net(
                     Variable(torch.from_numpy(current_state)).cuda().float())
@@ -145,7 +150,10 @@ class PolicyValueNet():
         entropy = -torch.mean(
                 torch.sum(torch.exp(log_act_probs) * log_act_probs, 1)
                 )
-        return loss.data[0], entropy.data[0]
+        self.loss_list.append(loss.data.item())
+        self.entropy_list.append(entropy.data.item())
+
+        return loss.data.item(), entropy.data.item()
         #for pytorch version >= 0.5 please use the following line instead.
         #return loss.item(), entropy.item()
 
@@ -157,3 +165,4 @@ class PolicyValueNet():
         """ save model params to file """
         net_params = self.get_policy_param()  # get model params
         torch.save(net_params, model_file)
+        torch.save((self.loss_list,self.entropy_list),model_file[:-6]+'_loss.pt')

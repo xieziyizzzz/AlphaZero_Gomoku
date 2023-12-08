@@ -5,14 +5,16 @@
 
 from __future__ import print_function
 import numpy as np
+import cv2
+from cv2 import matchTemplate as cv2m
 
 
 class Board(object):
     """board for the game"""
 
     def __init__(self, **kwargs):
-        self.width = int(kwargs.get('width', 8))
-        self.height = int(kwargs.get('height', 8))
+        self.width = int(kwargs.get('width', 11))
+        self.height = int(kwargs.get('height', 11))
         # board states stored as a dict,
         # key: move as location on the board,
         # value: player as pieces type
@@ -53,12 +55,29 @@ class Board(object):
             return -1
         return move
 
+    def rules(self):
+        candidate_rule = [np.array([[0,0,1],[0,1,0],[0,1,1]]),
+                         np.array([[0,0,0,1],[0,0,0,0],[0,1,0,0],[0,0,1,1]]), np.array([[1,1,1]]),np.array([[1,1,0],[0,0,0],[0,0,1],[0,1,0]]), np.array([[0,1,0],[1,0,1],[0,1,0]])]
+        for i in range(len(candidate_rule)):
+            candidate_rule.append(np.flipud(candidate_rule[i]))
+        for i in range(len(candidate_rule)):
+            candidate_rule.append(np.rot90(candidate_rule[i]))
+        
+        return candidate_rule
+
     def current_state(self):
         """return the board state from the perspective of the current player.
         state shape: 4*width*height
         """
+        # change things around here for feature engineering
 
-        square_state = np.zeros((4, self.width, self.height))
+        # square_state = np.zeros((4, self.width, self.height))
+
+        taolu_list = self.rules()
+
+
+
+        square_state = np.zeros((6, self.width, self.height))
         if self.states:
             moves, players = np.array(list(zip(*self.states.items())))
             move_curr = moves[players == self.current_player]
@@ -70,6 +89,14 @@ class Board(object):
             # indicate the last move location
             square_state[2][self.last_move // self.width,
                             self.last_move % self.height] = 1.0
+            # indicate distance to board edge
+            square_state[4][:,:] = 0.1*max(abs(self.last_move // self.width - self.width),
+                                    abs(self.last_move % self.height - self.height))
+
+            for taolu in taolu_list:
+                 if len(np.where(cv2m(square_state[0].astype('uint8'),taolu.astype('uint8'),cv2.TM_SQDIFF))):
+                     square_state[5][:,:] = 0.1
+            
         if len(self.states) % 2 == 0:
             square_state[3][:, :] = 1.0  # indicate the colour to play
         return square_state[:, ::-1, :]
